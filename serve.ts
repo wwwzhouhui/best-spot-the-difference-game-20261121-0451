@@ -1,43 +1,41 @@
-// Twin Worlds — local static server (Node 22, standard library only).
-// Serves game/ on http://localhost:8080, or --port <n>. No build step, no network.
+// Tiny static server for playing Twin Worlds locally.
+// Serves game/ at the root so game/index.html opens at
+// http://localhost:8080/ with no network requests.
+// Usage: node serve.ts [--port 8080]
+
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const gameDir = join(here, 'game');
-const portArg = process.argv.indexOf('--port');
-const port = portArg >= 0 ? Number(process.argv[portArg + 1]) || 8080 : 8080;
+const root = join(new URL('.', import.meta.url).pathname, 'game');
+const argv = process.argv.slice(2);
+const portArg = argv.find((a) => a.startsWith('--port='))?.split('=')[1]
+  || (argv.includes('--port') ? argv[argv.indexOf('--port') + 1] : undefined);
+const port = Number(portArg || 8080);
 
 const TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
 };
 
-const server = createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url || '/', 'http://localhost');
-    const path = decodeURIComponent(url.pathname);
-    const file = join(gameDir, path === '/' ? 'index.html' : path);
-    if (!file.startsWith(gameDir)) {
-      res.writeHead(403);
-      res.end('forbidden');
-      return;
-    }
-    const data = await readFile(file);
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
-    res.end(data);
-  } catch {
-    res.writeHead(404);
+const server = createServer((req, res) => {
+  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  const rel = normalize(urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, ''));
+  const file = join(root, rel);
+  if (!file.startsWith(root) || !existsSync(file) || !statSync(file).isFile()) {
+    res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
+    return;
   }
+  res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
+  res.end(readFileSync(file));
 });
 
-server.listen(port, () => {
-  console.log(`Twin Worlds at http://localhost:${port}`);
-});
+server.listen(port, () => console.log(`Twin Worlds at http://localhost:${port}/`));

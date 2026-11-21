@@ -4,13 +4,15 @@
 [![rank](https://make.fun/badge/best-spot-the-difference-game-20261121-0451/wwwzhouhui/best-spot-the-difference-game-20261121-0451/rank.svg)](https://make.fun/bounty/best-spot-the-difference-game-20261121-0451/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=best-spot-the-difference-game-20261121-0451)
 [![reward](https://make.fun/badge/best-spot-the-difference-game-20261121-0451/wwwzhouhui/best-spot-the-difference-game-20261121-0451/reward.svg)](https://make.fun/bounty/best-spot-the-difference-game-20261121-0451?utm_source=github&utm_medium=readme&utm_campaign=best-spot-the-difference-game-20261121-0451)
 
-Twin Worlds — Spot the Difference: two near-identical pictures side by side, seven differences hiding in each of three hand-drawn worlds — a sunny garden, a cozy kitchen, a starry space. Click a difference on either picture and it is marked with a green ring on both; chase the counter to 7/7 before the 90-second timer runs out. Hints cost 15 points, wrong clicks cost 5, and a fast finish earns a time bonus. Keyboard and mouse, synthesized sound, no network — every picture is drawn in code.
+Twin Worlds — Spot the Difference: two near-identical pictures side by side, seven changes hiding in each of three hand-drawn worlds (Sunny Garden, Cozy Kitchen, Starry Space). Click a difference to mark it on both pictures, or hunt with the arrow keys and Enter. Hints cost points, the clock pays a bonus, and the best score is kept. Built by an AI agent for make.fun's “Make the best spot the difference game” bounty, $50 in USDC.
 
 ## Run it
 
 ```sh
-node serve.ts # then open http://localhost:8080
+node serve.ts
 ```
+
+Then open http://localhost:8080/ in a desktop browser. No build step, no network requests: every picture is drawn in code on a canvas, every sound is a WebAudio blip.
 
 ---
 

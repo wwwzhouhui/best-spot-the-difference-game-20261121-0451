@@ -1,7 +1,14 @@
-// Paints the whole game from the world's state. Every frame is drawn from scratch,
-// so a screenshot is always a faithful picture of the current state.
-import { FIELD, PANEL, PALETTE, FONT, LEVEL_SECONDS } from './config.js';
-import { drawScene } from './scenes.js';
+// Rendering for Twin Worlds: one draw per animation frame.
+// The frame is 1280 x 720: a top HUD, the two pictures side by side,
+// a bottom strip of instructions. Found differences get a green ring and
+// a check on both pictures at once; the timer bar turns red under 15 s.
+
+import { LEVELS, PANEL } from './levels.js';
+import { PAINTERS } from './paint.js';
+import { currentLevel } from './engine.js';
+
+const W = 1280;
+const H = 720;
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -13,229 +20,209 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function text(ctx, s, x, y, size, color, weight, align) {
-  ctx.fillStyle = color;
-  ctx.font = `${weight || 400} ${size}px ${FONT}`;
-  ctx.textAlign = align || 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(s, x, y);
-}
-
-function panelOrigin(side) {
-  return { x: side === 'left' ? PANEL.leftX : PANEL.rightX, y: PANEL.y };
-}
-
-function drawMarker(ctx, x, y, r, pulse) {
-  const pr = r + 5 + Math.sin(pulse) * 3;
-  ctx.strokeStyle = PALETTE.found;
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.arc(x, y, pr, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = PALETTE.foundSoft;
-  ctx.beginPath();
-  ctx.arc(x, y, pr, 0, Math.PI * 2);
+function drawPanelFrame(ctx, x) {
+  ctx.fillStyle = '#0f172a';
+  roundRect(ctx, x - 6, PANEL.y - 6, PANEL.w + 12, PANEL.h + 12, 10);
   ctx.fill();
-  // A small check in the middle of the ring.
-  ctx.strokeStyle = PALETTE.found;
-  ctx.lineWidth = 4;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(x - 7, y);
-  ctx.lineTo(x - 2, y + 6);
-  ctx.lineTo(x + 8, y - 6);
-  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 15px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(x === PANEL.ax ? 'A' : 'B', x + 2, PANEL.y - 12);
 }
 
-function drawButton(ctx, b, label) {
-  ctx.fillStyle = PALETTE.button;
-  roundRect(ctx, b.x, b.y, b.w, b.h, 12);
-  ctx.fill();
-  ctx.strokeStyle = PALETTE.accent;
-  ctx.lineWidth = 2;
-  roundRect(ctx, b.x, b.y, b.w, b.h, 12);
-  ctx.stroke();
-  text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + 1, 24, PALETTE.text, 700, 'center');
-}
-
-function drawOverlay(ctx, title, lines, buttons, buttonLabels) {
-  ctx.fillStyle = 'rgba(10, 14, 24, 0.78)';
-  ctx.fillRect(0, 0, FIELD.width, FIELD.height);
-  text(ctx, title, FIELD.width / 2, 210, 52, PALETTE.text, 800, 'center');
-  lines.forEach((line, i) => {
-    text(ctx, line, FIELD.width / 2, 290 + i * 44, 24, PALETTE.muted, 400, 'center');
-  });
-  buttons.forEach((b, i) => drawButton(ctx, b, buttonLabels[i]));
-}
-
-function formatTime(seconds) {
-  const s = Math.max(0, Math.ceil(seconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
-
-export function render(ctx, world) {
-  const w = world;
-  ctx.clearRect(0, 0, FIELD.width, FIELD.height);
-  ctx.fillStyle = PALETTE.backdrop;
-  ctx.fillRect(0, 0, FIELD.width, FIELD.height);
-
-  // --- HUD -----------------------------------------------------------------
-  // Row 1: title, level name, score. Row 2: found counter, timer, hints.
-  ctx.fillStyle = PALETTE.hud;
-  ctx.fillRect(0, 0, FIELD.width, 100);
-  text(ctx, 'TWIN WORLDS', 32, 34, 30, PALETTE.text, 800);
-  text(ctx, 'Spot the Difference', 282, 36, 16, PALETTE.muted, 400);
-  text(ctx, `Level ${w.levelIndex + 1} · ${w.level.name}`, FIELD.width / 2, 34, 22, PALETTE.accent, 700, 'center');
-  text(ctx, `Score ${w.score}`, FIELD.width - 32, 34, 22, PALETTE.text, 700, 'right');
-
-  // Found counter: "Found 3 / 7" plus one dot per difference, green once found.
-  const counter = `Found ${w.foundCount} / ${w.found.length}`;
-  text(ctx, counter, 32, 70, 20, PALETTE.text, 700);
-  const dotsX = 32 + ctx.measureText(counter).width + 22;
-  w.found.forEach((f, i) => {
-    ctx.fillStyle = f ? PALETTE.found : '#3a4763';
-    ctx.beginPath();
-    ctx.arc(dotsX + i * 26, 70, 8, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  text(ctx, `${w.remainingCount} left`, dotsX + w.found.length * 26 + 12, 70, 18, PALETTE.muted, 400);
-
-  // Timer bar and readout, centred.
-  const barX = 560;
-  const barW = 320;
-  const frac = Math.max(0, w.timeLeft / LEVEL_SECONDS);
-  ctx.fillStyle = '#2a3550';
-  roundRect(ctx, barX, 60, barW, 20, 10);
-  ctx.fill();
-  ctx.fillStyle = frac < 0.2 ? PALETTE.timerLow : PALETTE.timer;
-  if (frac > 0) {
-    roundRect(ctx, barX, 60, barW * frac, 20, 10);
-    ctx.fill();
-  }
-  text(ctx, formatTime(w.timeLeft), barX + barW + 14, 70, 22, frac < 0.2 ? PALETTE.timerLow : PALETTE.text, 700);
-  text(ctx, `Hints ${w.hintsLeft} (H)  ·  Total ${w.totalScore}`, FIELD.width - 32, 70, 16, PALETTE.muted, 400, 'right');
-
-  // --- The two pictures ------------------------------------------------------
-  for (const side of ['left', 'right']) {
-    const origin = panelOrigin(side);
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(origin.x, origin.y, PANEL.width, PANEL.height);
-    ctx.clip();
-    ctx.translate(origin.x, origin.y);
-    drawScene(ctx, w.levelIndex, side === 'right');
-    ctx.restore();
-    ctx.strokeStyle = PALETTE.panelBorder;
-    ctx.lineWidth = 3;
-    ctx.strokeRect(origin.x, origin.y, PANEL.width, PANEL.height);
-    // A / B badge.
-    ctx.fillStyle = PALETTE.hud;
-    roundRect(ctx, origin.x + 10, origin.y + 10, 36, 36, 8);
-    ctx.fill();
-    text(ctx, side === 'left' ? 'A' : 'B', origin.x + 28, origin.y + 29, 22, PALETTE.accent, 800, 'center');
-  }
-
-  // --- Markers on both pictures ---------------------------------------------
-  const pulse = w.time * 3;
-  w.found.forEach((f, i) => {
-    if (!f) return;
-    const d = w.level.differences[i];
-    for (const side of ['left', 'right']) {
-      const o = panelOrigin(side);
-      drawMarker(ctx, o.x + d.x, o.y + d.y, d.r, pulse);
-    }
-  });
-  if (w.hintPulse) {
-    const d = w.level.differences[w.hintPulse.index];
-    const pr = d.r + 8 + Math.sin(pulse * 2) * 5;
-    for (const side of ['left', 'right']) {
-      const o = panelOrigin(side);
-      ctx.strokeStyle = PALETTE.hint;
-      ctx.lineWidth = 4;
-      ctx.setLineDash([10, 6]);
+function drawFoundMarks(ctx, state) {
+  const level = currentLevel(state);
+  ctx.strokeStyle = '#22c55e';
+  ctx.lineWidth = 5;
+  ctx.fillStyle = '#22c55e';
+  for (const d of level.differences) {
+    if (!state.found.has(d.id)) continue;
+    for (const ox of [PANEL.ax, PANEL.bx]) {
       ctx.beginPath();
-      ctx.arc(o.x + d.x, o.y + d.y, pr, 0, Math.PI * 2);
+      ctx.arc(ox + d.x, PANEL.y + d.y, d.r + 4, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.font = 'bold 20px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('✓', ox + d.x, PANEL.y + d.y + 7);
     }
   }
-  for (const miss of w.misses) {
-    const o = panelOrigin(miss.side);
-    const alpha = Math.max(0, miss.t / 0.9);
-    ctx.strokeStyle = `rgba(239, 71, 111, ${alpha})`;
-    ctx.lineWidth = 5;
-    ctx.lineCap = 'round';
-    const x = o.x + miss.x;
-    const y = o.y + miss.y;
-    ctx.beginPath();
-    ctx.moveTo(x - 10, y - 10);
-    ctx.lineTo(x + 10, y + 10);
-    ctx.moveTo(x + 10, y - 10);
-    ctx.lineTo(x - 10, y + 10);
-    ctx.stroke();
-  }
+}
 
-  // "Found: Butterfly! — 4 left" toast.
-  if (w.lastFound) {
-    const alpha = Math.min(1, w.lastFound.t);
-    ctx.fillStyle = `rgba(20, 26, 38, ${alpha * 0.9})`;
-    roundRect(ctx, FIELD.width / 2 - 220, 118, 440, 44, 10);
+function drawHud(ctx, state) {
+  const level = currentLevel(state);
+  ctx.fillStyle = '#16233d';
+  ctx.fillRect(0, 0, W, 64);
+  ctx.fillStyle = '#fbbf24';
+  ctx.font = 'bold 26px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('TWIN WORLDS', 24, 42);
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = '16px system-ui, sans-serif';
+  ctx.fillText(`Level ${state.levelIndex + 1}/3 · ${level.name}`, 260, 40);
+
+  const found = state.found.size;
+  const total = level.differences.length;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`Found ${found}/${total} · ${total - found} left`, 880, 30);
+  ctx.fillText(`Score ${state.score}`, 880, 54);
+  for (let i = 0; i < total; i++) {
+    ctx.fillStyle = i < found ? '#22c55e' : '#334155';
+    ctx.beginPath();
+    ctx.arc(908 + i * 22, 24, 8, 0, Math.PI * 2);
     ctx.fill();
-    text(ctx, `Found: ${w.lastFound.label}!  ${w.remainingCount} left`, FIELD.width / 2, 141, 20, `rgba(61, 220, 132, ${alpha})`, 700, 'center');
   }
 
-  // Keyboard cursor, only while playing.
-  if (w.screen === 'play' && w.cursorVisible) {
-    const c = w.cursor;
-    ctx.strokeStyle = PALETTE.accent;
-    ctx.lineWidth = 2;
+  // Timer bar with seconds.
+  const tw = 150;
+  const tx = 1100;
+  const frac = Math.max(0, state.timeLeft / 90);
+  ctx.fillStyle = '#334155';
+  roundRect(ctx, tx, 18, tw, 16, 8);
+  ctx.fill();
+  ctx.fillStyle = frac < 0.17 ? '#ef4444' : '#38bdf8';
+  if (frac > 0) {
+    roundRect(ctx, tx, 18, tw * frac, 16, 8);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 16px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  const secs = Math.ceil(state.timeLeft);
+  ctx.fillText(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`, tx + 6, 52);
+  ctx.textAlign = 'right';
+  ctx.fillText(`Hints ${state.hintsLeft}`, 1250, 52);
+  ctx.textAlign = 'left';
+}
+
+function drawFooter(ctx, state) {
+  ctx.fillStyle = '#16233d';
+  ctx.fillRect(0, 606, W, 114);
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '15px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(
+    'Click a difference · H hint (−15) · P pause · R restart level · N next level · M mute · Arrow keys + Enter work too',
+    W / 2,
+    636,
+  );
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = '15px system-ui, sans-serif';
+  if (state.toast && performance.now() < state.toastUntil) {
+    ctx.fillText(state.toast, W / 2, 668);
+  } else if (state.best > 0) {
+    ctx.fillText(`Best score: ${state.best}`, W / 2, 668);
+  }
+}
+
+function drawCursor(ctx, state) {
+  const p = state.mouse.inside ? state.mouse : state.cursor;
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(p.x - 18, p.y);
+  ctx.lineTo(p.x + 18, p.y);
+  ctx.moveTo(p.x, p.y - 18);
+  ctx.lineTo(p.x, p.y + 18);
+  ctx.stroke();
+}
+
+function overlay(ctx, title, lines, accent) {
+  ctx.fillStyle = 'rgba(10, 15, 30, 0.72)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = accent;
+  ctx.font = 'bold 44px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, W / 2, 300);
+  ctx.fillStyle = '#e2e8f0';
+  ctx.font = '20px system-ui, sans-serif';
+  lines.forEach((line, i) => ctx.fillText(line, W / 2, 350 + i * 34));
+  ctx.textAlign = 'left';
+}
+
+export function draw(ctx, state, now) {
+  ctx.fillStyle = '#0b1220';
+  ctx.fillRect(0, 0, W, H);
+  const level = currentLevel(state);
+  const paint = PAINTERS[level.id];
+
+  drawHud(ctx, state);
+  drawPanelFrame(ctx, PANEL.ax);
+  drawPanelFrame(ctx, PANEL.bx);
+  paint(ctx, PANEL.ax, PANEL.y, false);
+  paint(ctx, PANEL.bx, PANEL.y, true);
+  drawFoundMarks(ctx, state);
+
+  if (state.hintRing && now < state.hintRing.until) {
+    const pulse = 1 + 0.12 * Math.sin(now / 130);
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 5;
+    for (const ox of [PANEL.ax, PANEL.bx]) {
+      ctx.beginPath();
+      ctx.arc(ox + state.hintRing.x, PANEL.y + state.hintRing.y, (state.hintRing.r + 6) * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  if (state.wrongFlash && now < state.wrongFlash.until) {
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 5;
+    const s = 12;
     ctx.beginPath();
-    ctx.arc(c.x, c.y, 14, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(c.x - 20, c.y);
-    ctx.lineTo(c.x - 8, c.y);
-    ctx.moveTo(c.x + 8, c.y);
-    ctx.lineTo(c.x + 20, c.y);
-    ctx.moveTo(c.x, c.y - 20);
-    ctx.lineTo(c.x, c.y - 8);
-    ctx.moveTo(c.x, c.y + 8);
-    ctx.lineTo(c.x, c.y + 20);
+    ctx.moveTo(state.wrongFlash.x - s, state.wrongFlash.y - s);
+    ctx.lineTo(state.wrongFlash.x + s, state.wrongFlash.y + s);
+    ctx.moveTo(state.wrongFlash.x + s, state.wrongFlash.y - s);
+    ctx.lineTo(state.wrongFlash.x - s, state.wrongFlash.y + s);
     ctx.stroke();
   }
 
-  // --- Footer ----------------------------------------------------------------
-  text(ctx, 'Click a difference on either picture  ·  Arrow keys move the cursor, Enter selects  ·  H hint (−15)  ·  P pause  ·  R restart level  ·  M mute', FIELD.width / 2, 668, 16, PALETTE.muted, 400, 'center');
-  text(ctx, 'Best score: ' + w.best, FIELD.width / 2, 696, 14, PALETTE.muted, 400, 'center');
+  drawFooter(ctx, state);
+  if (state.screen === 'playing' || state.screen === 'paused') drawCursor(ctx, state);
 
-  // --- Screens ---------------------------------------------------------------
-  if (w.screen === 'title') {
-    drawOverlay(ctx, 'TWIN WORLDS', [
-      'Two pictures, side by side. Seven differences hiding in each pair.',
-      'Click a difference on either picture — the same spot counts on both.',
-      'Three levels · 90 seconds each · Hints cost 15 points, wrong clicks cost 5.',
-    ], w.buttons(), ['▶  Start']);
-  } else if (w.screen === 'paused') {
-    drawOverlay(ctx, 'Paused', [
-      'Take a breath. The timer is stopped.',
-    ], w.buttons(), ['Resume', 'Restart level']);
-  } else if (w.screen === 'leveldone') {
-    const next = w.levelIndex + 1 < 3 ? `Level ${w.levelIndex + 2} awaits.` : 'That was the last level!';
-    drawOverlay(ctx, 'Level complete!', [
-      `All 7 differences found in ${w.level.name}.`,
-      `Level score ${w.score}  +  time bonus ${w.levelBonus}  =  ${w.score + w.levelBonus}`,
-      `Total score ${w.totalScore}`,
-      next,
-    ], w.buttons(), [w.levelIndex + 1 < 3 ? 'Next level  ▶' : 'See results  ▶']);
-  } else if (w.screen === 'gameover') {
-    drawOverlay(ctx, 'You found them all!', [
-      `Final score ${w.totalScore}   ·   Best ${w.best}`,
-      'Three worlds, twenty-one differences, none left hiding.',
-    ], w.buttons(), ['Play again']);
-  } else if (w.screen === 'failed') {
-    drawOverlay(ctx, "Time's up!", [
-      `You found ${w.foundCount} of 7 differences in ${w.level.name}.`,
-      'Try the level again — the pictures stay the same.',
-    ], w.buttons(), ['Try again']);
+  if (state.screen === 'title') {
+    overlay(ctx, 'TWIN WORLDS', [
+      'Spot the difference — two pictures, seven changes.',
+      'Three worlds: Sunny Garden, Cozy Kitchen, Starry Space.',
+      'Click a difference, or move with the arrow keys and press Enter.',
+      '',
+      'Press Enter or click Start to play',
+    ], '#fbbf24');
+    ctx.fillStyle = '#22c55e';
+    roundRect(ctx, W / 2 - 90, 500, 180, 52, 10);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 24px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('▶  Start', W / 2, 535);
+    ctx.textAlign = 'left';
+  } else if (state.screen === 'paused') {
+    overlay(ctx, 'Paused', ['Press P to keep playing.', 'R restarts this level.'], '#38bdf8');
+  } else if (state.screen === 'leveldone') {
+    overlay(ctx, 'Level Complete!', [
+      `You found all ${level.differences.length} differences.`,
+      `Finds ${state.levelScore - state.timeBonus}  +  time bonus ${state.timeBonus}  =  ${state.levelScore}`,
+      `Total score ${state.score}`,
+      '',
+      state.levelIndex + 1 >= LEVELS.length
+        ? 'Press N to see your final score'
+        : 'Press N for the next level',
+    ], '#22c55e');
+  } else if (state.screen === 'alldone') {
+    overlay(ctx, 'You found them all!', [
+      `Final score ${state.total}  ·  Best ${Math.max(state.best, state.total)}`,
+      'Three worlds, twenty-one differences, all found.',
+      '',
+      'Press Enter to play again',
+    ], '#fbbf24');
+  } else if (state.screen === 'timeout') {
+    overlay(ctx, "Time's up!", [
+      `You found ${state.found.size} of ${level.differences.length} differences.`,
+      `Score ${state.score}`,
+      '',
+      'Press R to retry this level',
+    ], '#ef4444');
   }
 }

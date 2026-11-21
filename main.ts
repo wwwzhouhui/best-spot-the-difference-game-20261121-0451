@@ -1,53 +1,69 @@
-// Twin Worlds — Spot the Difference: the build entry point (Node 22, standard library only).
-// The game is the plain static files in game/ — index.html plus ES modules, no library, no
-// network request, every picture drawn in code. This program hands it in: it copies game/
-// and screenshots/ from beside this file to the output directory and writes dossier.json,
-// the summary the judge reads, using the vendored make.fun library.
-//
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+// Entry point for Twin Worlds (best-spot-the-difference-game-20261121-0451).
+// Copies game/ and screenshots/ from this repository into the output
+// directory and writes dossier.json with buildDossier from the kit's
+// vendored library, so the dossier is byte for byte what the scorer
+// rebuilds from the same files. Outside the grader, MAKEFUN_OUTPUT_DIR
+// stands in for /output. Standard library only; runs on Node 22 as-is.
 
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, lstatSync, chmodSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const repoRoot = dirname(fileURLToPath(import.meta.url));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR || '/output';
 
-function copyTree(from: string, to: string): void {
-  mkdirSync(to, { recursive: true });
-  cpSync(from, to, { recursive: true });
-}
-
-// The grader reads /output as another user, so every file it holds must be
-// world-readable and every folder traversable, whatever the umask was.
-function chmodTree(dir: string): void {
-  chmodSync(dir, 0o755);
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    if (statSync(path).isDirectory()) chmodTree(path);
-    else chmodSync(path, 0o644);
+function copyTree(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true });
+  for (const name of readdirSync(src)) {
+    const from = join(src, name);
+    const to = join(dest, name);
+    const st = lstatSync(from);
+    if (st.isSymbolicLink()) throw new Error(`refusing to copy symlink: ${from}`);
+    if (st.isDirectory()) copyTree(from, to);
+    else if (st.isFile()) cpSync(from, to);
   }
 }
 
-copyTree(join(here, 'game'), join(out, 'game'));
-if (existsSync(join(here, 'screenshots'))) {
-  copyTree(join(here, 'screenshots'), join(out, 'screenshots'));
+function chmodTree(dir: string): void {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const st = lstatSync(p);
+    if (st.isDirectory()) {
+      chmodSync(p, 0o755);
+      chmodTree(p);
+    } else if (st.isFile()) {
+      chmodSync(p, 0o644);
+    }
+  }
 }
 
-// The scorer's own caps: only text_max_bytes shapes the bytes; the others refuse an
-// entry the scorer would refuse — more than 4 screenshots or one over 256 KiB; more
-// than 993 files in game/ or 48 MiB of game files in all; or a path under game/ over
-// 1000 bytes.
-const dossier = buildDossier(out, {
+mkdirSync(outDir, { recursive: true });
+
+// Pre-flight: fail fast with a clear message when the entry is
+// incomplete, instead of handing the grader a broken output.
+const indexHtml = join(repoRoot, 'game', 'index.html');
+if (!existsSync(indexHtml)) throw new Error('game/index.html missing from repository');
+const shots = readdirSync(join(repoRoot, 'screenshots')).filter((n) => !n.startsWith('.'));
+if (shots.length < 3 || shots.length > 4) {
+  throw new Error(`screenshots/ must hold 3 or 4 images, found ${shots.length}`);
+}
+for (const shot of shots) {
+  if (!/\.(png|jpe?g)$/i.test(shot)) throw new Error(`screenshot is not PNG or JPEG: ${shot}`);
+}
+
+copyTree(join(repoRoot, 'game'), join(outDir, 'game'));
+copyTree(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'));
+
+const dossier = buildDossier(outDir, {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
 });
-writeFileSync(join(out, 'dossier.json'), dossier);
-chmodTree(out);
-console.log(`Wrote ${join(out, 'dossier.json')} (${dossier.length} bytes)`);
+writeFileSync(join(outDir, 'dossier.json'), dossier);
+chmodTree(outDir);
+chmodSync(outDir, 0o755);
+const gameFiles = readdirSync(join(outDir, 'game'), { recursive: true }).length;
+console.log(`wrote ${outDir}/dossier.json (${dossier.length} bytes) from ${gameFiles} game entries and ${shots.length} screenshots`);
