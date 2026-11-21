@@ -8,7 +8,7 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -19,6 +19,17 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 function copyTree(from: string, to: string): void {
   mkdirSync(to, { recursive: true });
   cpSync(from, to, { recursive: true });
+}
+
+// The grader reads /output as another user, so every file it holds must be
+// world-readable and every folder traversable, whatever the umask was.
+function chmodTree(dir: string): void {
+  chmodSync(dir, 0o755);
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) chmodTree(path);
+    else chmodSync(path, 0o644);
+  }
 }
 
 copyTree(join(here, 'game'), join(out, 'game'));
@@ -38,4 +49,5 @@ const dossier = buildDossier(out, {
   game_path_max_bytes: 1000,
 });
 writeFileSync(join(out, 'dossier.json'), dossier);
+chmodTree(out);
 console.log(`Wrote ${join(out, 'dossier.json')} (${dossier.length} bytes)`);
